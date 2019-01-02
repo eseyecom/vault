@@ -20,6 +20,7 @@ import (
 	*/
 	_ "github.com/hashicorp/vault/helper/builtinplugins"
 
+	auditCloudWatch "github.com/hashicorp/vault/builtin/audit/cloudwatch"
 	auditFile "github.com/hashicorp/vault/builtin/audit/file"
 	auditSocket "github.com/hashicorp/vault/builtin/audit/socket"
 	auditSyslog "github.com/hashicorp/vault/builtin/audit/syslog"
@@ -82,9 +83,10 @@ const (
 
 var (
 	auditBackends = map[string]audit.Factory{
-		"file":   auditFile.Factory,
-		"socket": auditSocket.Factory,
-		"syslog": auditSyslog.Factory,
+		"cloudwatch": auditCloudWatch.Factory,
+		"file":       auditFile.Factory,
+		"socket":     auditSocket.Factory,
+		"syslog":     auditSyslog.Factory,
 	}
 
 	credentialBackends = map[string]logical.Factory{

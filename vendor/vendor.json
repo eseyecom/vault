@@ -643,6 +643,12 @@
 			"revisionTime": "2018-10-15T21:27:28Z"
 		},
 		{
+			"checksumSHA1": "GTzGu0LXjYNIhXM30Igd6DovyKk=",
+			"path": "github.com/aws/aws-sdk-go/service/cloudwatchlogs",
+			"revision": "8234000fff968de811646c75b200b0c713f800ec",
+			"revisionTime": "2018-12-21T22:39:25Z"
+		},
+		{
 			"checksumSHA1": "Ca+Lj+lYT1bFPmFqRFse3jtH1QA=",
 			"path": "github.com/aws/aws-sdk-go/service/dynamodb",
 			"revision": "6e42625fcba9345ab67b42b6744284e8f7e3e79d",
