@@ -1,6 +1,7 @@
 package framework
 
 import (
+	"bytes"
 	"encoding/json"
 	"io/ioutil"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/go-test/deep"
 	"github.com/hashicorp/vault/helper/jsonutil"
+	"github.com/hashicorp/vault/helper/wrapping"
 	"github.com/hashicorp/vault/logical"
 	"github.com/hashicorp/vault/version"
 )
@@ -326,11 +328,27 @@ func TestOpenAPI_Paths(t *testing.T) {
 				},
 				"name": {
 					Type:        TypeNameString,
+					Default:     "Larry",
 					Description: "the name",
 				},
+				"age": {
+					Type:             TypeInt,
+					Description:      "the age",
+					AllowedValues:    []interface{}{1, 2, 3},
+					Required:         true,
+					DisplayName:      "Age",
+					DisplayValue:     7,
+					DisplaySensitive: true,
+				},
 				"x-abc-token": {
-					Type:        TypeHeader,
-					Description: "a header value",
+					Type:          TypeHeader,
+					Description:   "a header value",
+					AllowedValues: []interface{}{"a", "b", "c"},
+				},
+				"format": {
+					Type:        TypeString,
+					Description: "a query param",
+					Query:       true,
 				},
 			},
 			HelpSynopsis:    "Synopsis",
@@ -399,6 +417,60 @@ func TestOpenAPI_Paths(t *testing.T) {
 	})
 }
 
+func TestOpenAPI_OperationID(t *testing.T) {
+	path1 := &Path{
+		Pattern: "foo/" + GenericNameRegex("id"),
+		Fields: map[string]*FieldSchema{
+			"id": {Type: TypeString},
+		},
+		Operations: map[logical.Operation]OperationHandler{
+			logical.ReadOperation:   &PathOperation{},
+			logical.UpdateOperation: &PathOperation{},
+			logical.DeleteOperation: &PathOperation{},
+		},
+	}
+
+	path2 := &Path{
+		Pattern: "Foo/" + GenericNameRegex("id"),
+		Fields: map[string]*FieldSchema{
+			"id": {Type: TypeString},
+		},
+		Operations: map[logical.Operation]OperationHandler{
+			logical.ReadOperation: &PathOperation{},
+		},
+	}
+
+	for _, context := range []string{"", "bar"} {
+		doc := NewOASDocument()
+		documentPath(path1, nil, logical.TypeLogical, doc)
+		documentPath(path2, nil, logical.TypeLogical, doc)
+		doc.CreateOperationIDs(context)
+
+		tests := []struct {
+			path string
+			op   string
+			opID string
+		}{
+			{"/Foo/{id}", "get", "getFooId"},
+			{"/foo/{id}", "get", "getFooId_2"},
+			{"/foo/{id}", "post", "postFooId"},
+			{"/foo/{id}", "delete", "deleteFooId"},
+		}
+
+		for _, test := range tests {
+			actual := getPathOp(doc.Paths[test.path], test.op).OperationID
+			expected := test.opID
+			if context != "" {
+				expected += "_" + context
+			}
+
+			if actual != expected {
+				t.Fatalf("expected %v, got %v", expected, actual)
+			}
+		}
+	}
+}
+
 func TestOpenAPI_CustomDecoder(t *testing.T) {
 	p := &Path{
 		Pattern:      "foo",
@@ -409,15 +481,18 @@ func TestOpenAPI_CustomDecoder(t *testing.T) {
 				Responses: map[int][]Response{
 					100: {{
 						Description: "OK",
-						Example:     &logical.Response{},
+						Example: &logical.Response{
+							Data: map[string]interface{}{
+								"foo": 42,
+							},
+						},
 					}},
 					200: {{
 						Description: "Good",
-						Example:     &logical.Response{},
+						Example:     (*logical.Response)(nil),
 					}},
 					599: {{
 						Description: "Bad",
-						Example:     &logical.Response{},
 					}},
 				},
 			},
@@ -427,10 +502,7 @@ func TestOpenAPI_CustomDecoder(t *testing.T) {
 	docOrig := NewOASDocument()
 	documentPath(p, nil, logical.TypeLogical, docOrig)
 
-	docJSON, err := json.Marshal(docOrig)
-	if err != nil {
-		t.Fatal(err)
-	}
+	docJSON := mustJSONMarshal(t, docOrig)
 
 	var intermediate map[string]interface{}
 	if err := jsonutil.DecodeJSON(docJSON, &intermediate); err != nil {
@@ -442,7 +514,44 @@ func TestOpenAPI_CustomDecoder(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if diff := deep.Equal(docOrig, docNew); diff != nil {
+	docNewJSON := mustJSONMarshal(t, docNew)
+
+	if diff := deep.Equal(docJSON, docNewJSON); diff != nil {
+		t.Fatal(diff)
+	}
+}
+
+func TestOpenAPI_CleanResponse(t *testing.T) {
+	// Verify that an all-null input results in empty JSON
+	orig := &logical.Response{}
+
+	cr := cleanResponse(orig)
+
+	newJSON := mustJSONMarshal(t, cr)
+
+	if !bytes.Equal(newJSON, []byte("{}")) {
+		t.Fatalf("expected {}, got: %q", newJSON)
+	}
+
+	// Verify that all non-null inputs results in JSON that matches the marshalling of
+	// logical.Response. This will fail if logical.Response changes without a corresponding
+	// change to cleanResponse()
+	orig = &logical.Response{
+		Secret:   new(logical.Secret),
+		Auth:     new(logical.Auth),
+		Data:     map[string]interface{}{"foo": 42},
+		Redirect: "foo",
+		Warnings: []string{"foo"},
+		WrapInfo: &wrapping.ResponseWrapInfo{Token: "foo"},
+		Headers:  map[string][]string{"foo": {"bar"}},
+	}
+	origJSON := mustJSONMarshal(t, orig)
+
+	cr = cleanResponse(orig)
+
+	cleanJSON := mustJSONMarshal(t, cr)
+
+	if diff := deep.Equal(origJSON, cleanJSON); diff != nil {
 		t.Fatal(diff)
 	}
 }
@@ -451,7 +560,10 @@ func testPath(t *testing.T, path *Path, sp *logical.Paths, expectedJSON string) 
 	t.Helper()
 
 	doc := NewOASDocument()
-	documentPath(path, sp, logical.TypeLogical, doc)
+	if err := documentPath(path, sp, logical.TypeLogical, doc); err != nil {
+		t.Fatal(err)
+	}
+	doc.CreateOperationIDs("")
 
 	docJSON, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
@@ -474,6 +586,19 @@ func testPath(t *testing.T, path *Path, sp *logical.Paths, expectedJSON string) 
 	}
 }
 
+func getPathOp(pi *OASPathItem, op string) *OASOperation {
+	switch op {
+	case "get":
+		return pi.Get
+	case "post":
+		return pi.Post
+	case "delete":
+		return pi.Delete
+	default:
+		panic("unexpected operation: " + op)
+	}
+}
+
 func expected(name string) string {
 	data, err := ioutil.ReadFile(filepath.Join("testdata", name+".json"))
 	if err != nil {
@@ -483,4 +608,13 @@ func expected(name string) string {
 	content := strings.Replace(string(data), "<vault_version>", version.GetVersion().Version, 1)
 
 	return content
+}
+
+func mustJSONMarshal(t *testing.T, data interface{}) []byte {
+	j, err := json.MarshalIndent(data, "", "  ")
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	return j
 }

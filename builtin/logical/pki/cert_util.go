@@ -27,7 +27,7 @@ import (
 	"github.com/hashicorp/vault/helper/strutil"
 	"github.com/hashicorp/vault/logical"
 	"github.com/hashicorp/vault/logical/framework"
-	"github.com/ryanuber/go-glob"
+	glob "github.com/ryanuber/go-glob"
 	"golang.org/x/crypto/cryptobyte"
 	cbbasn1 "golang.org/x/crypto/cryptobyte/asn1"
 	"golang.org/x/net/idna"
@@ -262,11 +262,11 @@ func fetchCertBySerial(ctx context.Context, req *logical.Request, prefix, serial
 		return nil, nil
 	}
 
-	// Retrieve the old-style path
-	certEntry, err = req.Storage.Get(ctx, legacyPath)
-	if err != nil {
-		return nil, errutil.InternalError{Err: fmt.Sprintf("error fetching certificate %s: %s", serial, err)}
-	}
+	// Retrieve the old-style path.  We disregard errors here because they
+	// always manifest on windows, and thus the initial check for a revoked
+	// cert fails would return an error when the cert isn't revoked, preventing
+	// the happy path from working.
+	certEntry, _ = req.Storage.Get(ctx, legacyPath)
 	if certEntry == nil {
 		return nil, nil
 	}
@@ -1416,7 +1416,7 @@ func signCertificate(data *dataBundle) (*certutil.ParsedCertBundle, error) {
 		certTemplate.DNSNames = data.params.DNSNames
 		certTemplate.EmailAddresses = data.params.EmailAddresses
 		certTemplate.IPAddresses = data.params.IPAddresses
-		certTemplate.URIs = data.csr.URIs
+		certTemplate.URIs = data.params.URIs
 	}
 
 	if err := handleOtherSANs(certTemplate, data.params.OtherSANs); err != nil {

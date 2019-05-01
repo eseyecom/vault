@@ -15,7 +15,7 @@ import (
 
 	log "github.com/hashicorp/go-hclog"
 
-	"github.com/armon/go-metrics"
+	metrics "github.com/armon/go-metrics"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -23,7 +23,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	"github.com/hashicorp/errwrap"
 	cleanhttp "github.com/hashicorp/go-cleanhttp"
-	"github.com/hashicorp/go-uuid"
+	uuid "github.com/hashicorp/go-uuid"
 	"github.com/hashicorp/vault/helper/awsutil"
 	"github.com/hashicorp/vault/helper/consts"
 	"github.com/hashicorp/vault/physical"
@@ -155,19 +155,6 @@ func NewDynamoDBBackend(conf map[string]string, logger log.Logger) (physical.Bac
 		writeCapacity = DefaultDynamoDBWriteCapacity
 	}
 
-	accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
-	if accessKey == "" {
-		accessKey = conf["access_key"]
-	}
-	secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
-	if secretKey == "" {
-		secretKey = conf["secret_key"]
-	}
-	sessionToken := os.Getenv("AWS_SESSION_TOKEN")
-	if sessionToken == "" {
-		sessionToken = conf["session_token"]
-	}
-
 	endpoint := os.Getenv("AWS_DYNAMODB_ENDPOINT")
 	if endpoint == "" {
 		endpoint = conf["endpoint"]
@@ -197,9 +184,9 @@ func NewDynamoDBBackend(conf map[string]string, logger log.Logger) (physical.Bac
 	}
 
 	credsConfig := &awsutil.CredentialsConfig{
-		AccessKey:    accessKey,
-		SecretKey:    secretKey,
-		SessionToken: sessionToken,
+		AccessKey:    conf["access_key"],
+		SecretKey:    conf["secret_key"],
+		SessionToken: conf["session_token"],
 	}
 	creds, err := credsConfig.GenerateCredentialChain()
 	if err != nil {
@@ -619,7 +606,7 @@ func (l *DynamoDBLock) tryToLock(stop, success chan struct{}, errors chan error)
 		case <-stop:
 			ticker.Stop()
 		case <-ticker.C:
-			err := l.writeItem()
+			err := l.updateItem(true)
 			if err != nil {
 				if err, ok := err.(awserr.Error); ok {
 					// Don't report a condition check failure, this means that the lock
@@ -646,7 +633,8 @@ func (l *DynamoDBLock) periodicallyRenewLock(done chan struct{}) {
 	for {
 		select {
 		case <-ticker.C:
-			l.writeItem()
+			// This should not renew the lock if the lock was deleted from under you.
+			l.updateItem(false)
 		case <-done:
 			ticker.Stop()
 			return
@@ -656,8 +644,23 @@ func (l *DynamoDBLock) periodicallyRenewLock(done chan struct{}) {
 
 // Attempts to put/update the dynamodb item using condition expressions to
 // evaluate the TTL.
-func (l *DynamoDBLock) writeItem() error {
+func (l *DynamoDBLock) updateItem(createIfMissing bool) error {
 	now := time.Now()
+
+	conditionExpression := ""
+	if createIfMissing {
+		conditionExpression += "attribute_not_exists(#path) or " +
+			"attribute_not_exists(#key) or "
+	} else {
+		conditionExpression += "attribute_exists(#path) and " +
+			"attribute_exists(#key) and "
+	}
+
+	// To work when upgrading from older versions that did not include the
+	// Identity attribute, we first check if the attr doesn't exist, and if
+	// it does, then we check if the identity is equal to our own.
+	// We also write if the lock expired.
+	conditionExpression += "(attribute_not_exists(#identity) or #identity = :identity or #expires <= :now)"
 
 	_, err := l.backend.client.UpdateItem(&dynamodb.UpdateItemInput{
 		TableName: aws.String(l.backend.table),
@@ -670,15 +673,7 @@ func (l *DynamoDBLock) writeItem() error {
 		// A. identity is equal to our identity (or the identity doesn't exist)
 		// or
 		// B. The ttl on the item is <= to the current time
-		ConditionExpression: aws.String(
-			"attribute_not_exists(#path) or " +
-				"attribute_not_exists(#key) or " +
-				// To work when upgrading from older versions that did not include the
-				// Identity attribute, we first check if the attr doesn't exist, and if
-				// it does, then we check if the identity is equal to our own.
-				"(attribute_not_exists(#identity) or #identity = :identity) or " +
-				"#expires <= :now",
-		),
+		ConditionExpression: aws.String(conditionExpression),
 		ExpressionAttributeNames: map[string]*string{
 			"#path":     aws.String("Path"),
 			"#key":      aws.String("Key"),
@@ -735,6 +730,7 @@ WatchLoop:
 				break WatchLoop
 			}
 		}
+		retries = DynamoDBWatchRetryMax
 	}
 
 	close(lost)

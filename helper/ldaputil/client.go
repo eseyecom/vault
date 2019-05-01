@@ -14,8 +14,8 @@ import (
 
 	"github.com/go-ldap/ldap"
 	"github.com/hashicorp/errwrap"
-	"github.com/hashicorp/go-hclog"
-	"github.com/hashicorp/go-multierror"
+	hclog "github.com/hashicorp/go-hclog"
+	multierror "github.com/hashicorp/go-multierror"
 	"github.com/hashicorp/vault/helper/tlsutil"
 )
 
@@ -428,7 +428,7 @@ func getCN(dn string) string {
 
 	for _, rdn := range parsedDN.RDNs {
 		for _, rdnAttr := range rdn.Attributes {
-			if rdnAttr.Type == "CN" {
+			if strings.EqualFold(rdnAttr.Type, "CN") {
 				return rdnAttr.Value
 			}
 		}

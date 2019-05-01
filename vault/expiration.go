@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/armon/go-metrics"
+	metrics "github.com/armon/go-metrics"
 	"github.com/hashicorp/errwrap"
 	log "github.com/hashicorp/go-hclog"
 	multierror "github.com/hashicorp/go-multierror"
@@ -827,11 +827,11 @@ func (m *ExpirationManager) Renew(ctx context.Context, leaseID string, increment
 		return logical.ErrorResponse("lease does not correspond to a secret"), nil
 	}
 
-	reqNS, err := namespace.FromContext(ctx)
+	ns, err := namespace.FromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if reqNS.ID != le.namespace.ID {
+	if ns.ID != le.namespace.ID {
 		return nil, errors.New("cannot renew a lease across namespaces")
 	}
 
@@ -1051,7 +1051,7 @@ func (m *ExpirationManager) Register(ctx context.Context, req *logical.Request, 
 	}
 
 	// Create a lease entry
-	leaseRand, err := base62.Random(TokenLength, true)
+	leaseRand, err := base62.Random(TokenLength)
 	if err != nil {
 		return "", err
 	}

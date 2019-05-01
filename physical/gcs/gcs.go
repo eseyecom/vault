@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	metrics "github.com/armon/go-metrics"
 	"github.com/hashicorp/errwrap"
 	log "github.com/hashicorp/go-hclog"
 	multierror "github.com/hashicorp/go-multierror"
@@ -19,7 +20,6 @@ import (
 	"github.com/hashicorp/vault/physical"
 
 	"cloud.google.com/go/storage"
-	"github.com/armon/go-metrics"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
@@ -148,7 +148,7 @@ func NewBackend(c map[string]string, logger log.Logger) (physical.Backend, error
 		logger.Warn("specifying credentials_file as an option is " +
 			"deprecated. Please use the GOOGLE_APPLICATION_CREDENTIALS environment " +
 			"variable or instance credentials instead.")
-		opts = append(opts, option.WithServiceAccountFile(credentialsFile))
+		opts = append(opts, option.WithCredentialsFile(credentialsFile))
 	}
 
 	ctx := context.Background()

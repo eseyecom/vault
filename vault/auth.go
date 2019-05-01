@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hashicorp/go-uuid"
+	uuid "github.com/hashicorp/go-uuid"
 	"github.com/hashicorp/vault/builtin/plugin"
 	"github.com/hashicorp/vault/helper/consts"
 	"github.com/hashicorp/vault/helper/jsonutil"
@@ -517,7 +517,7 @@ func (c *Core) persistAuth(ctx context.Context, table *MountTable, local *bool) 
 		}
 
 		// Create an entry
-		entry := &Entry{
+		entry := &logical.StorageEntry{
 			Key:   path,
 			Value: compressedBytes,
 		}
